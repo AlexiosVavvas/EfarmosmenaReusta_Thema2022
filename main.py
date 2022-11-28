@@ -1,12 +1,11 @@
 from PipeNetworks import *
 
-nodes, tubes = Network.Create("nodes_input.csv", "tubes_input.csv")
+my_network = Network("nodes_input.csv", "tubes_input.csv")
 
-Network.FindConnectedTubes(nodes, tubes)
-Network.FindNeighbouringElements(nodes, tubes)
+my_network.FindConnectedTubes()
+my_network.FindNeighbouringElements()
 
-Network.Plot(nodes, tubes)
-
+my_network.Plot()
 # for i in range(Node.number_of_nodes):
 #     print(f"Node {i} is connected with tubes: {nodes[i].connectedTubes}")
 # print()
