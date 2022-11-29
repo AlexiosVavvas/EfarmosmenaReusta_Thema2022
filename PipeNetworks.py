@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from math import *
 
 
 class Node:
@@ -11,7 +12,7 @@ class Node:
         if len(coordinates) == 3:
             self.z = coordinates[2]
         else:
-            self.z = None
+            self.z = 0
         self.p_static = None  # pressure [Pa]
         self.p0 = None  # pressure [Pa]
         self.consumption = 0  # Consumption (+: outbound, -: inbound)
@@ -36,9 +37,9 @@ class Tube:
 
 class Network:
 
-    def __init__(self, nodes_file_dir, tubes_file_dir):
-        nodes_input = np.genfromtxt(nodes_file_dir, delimiter=',')
-        tubes_input = np.genfromtxt(tubes_file_dir, delimiter=',')
+    def __init__(self, nodes_file_dir: str, tubes_file_dir: str):
+        nodes_input = np.genfromtxt(nodes_file_dir, delimiter=',', skip_header=1)
+        tubes_input = np.genfromtxt(tubes_file_dir, delimiter=',', skip_header=1)
         self.nodes = []
         self.tubes = []
         for i in range(len(nodes_input[:, 0])):
@@ -78,16 +79,12 @@ class Network:
 
     def Plot(self):
         plt.figure()
-        if self.nodes[0].z is not None:
-            plt.axes(projection='3d')
+        plt.axes(projection='3d')
         for i in range(self.number_of_tubes):
             xs = [self.nodes[self.tubes[i].connectedNodes[0]].x, self.nodes[self.tubes[i].connectedNodes[1]].x]
             ys = [self.nodes[self.tubes[i].connectedNodes[0]].y, self.nodes[self.tubes[i].connectedNodes[1]].y]
-            if self.nodes[0].z is not None:
-                zs = [self.nodes[self.tubes[i].connectedNodes[0]].z, self.nodes[self.tubes[i].connectedNodes[1]].z]
-                plt.plot(xs, ys, zs, 'ko-')
-            else:
-                plt.plot(xs, ys, 'ko-')
+            zs = [self.nodes[self.tubes[i].connectedNodes[0]].z, self.nodes[self.tubes[i].connectedNodes[1]].z]
+            plt.plot(xs, ys, zs, 'ko-')
 
         plt.grid()
         plt.show()
@@ -98,3 +95,20 @@ def sign(x, y):
         return 1
     else:
         return -1
+
+
+# Condition number to check if a matrix is ill-conditioned or not
+# if the result is << 1 then it probably is
+def matrix_state(mat: np.ndarray):
+    a_ = abs(np.linalg.det(mat))
+    b_ = 1
+    row, col = mat.shape
+    r = np.zeros(row)
+    for i in range(row):
+        ri_temp = 0
+        for j in range(col):
+            ri_temp += mat[i, j] ** 2
+        r[i] = sqrt(ri_temp)
+        b_ *= r[i]
+
+    return a_ / b_
