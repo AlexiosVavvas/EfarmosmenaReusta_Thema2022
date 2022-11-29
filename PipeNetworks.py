@@ -12,7 +12,9 @@ class Node:
             self.z = coordinates[2]
         else:
             self.z = None
+        self.p_static = None  # pressure [Pa]
         self.p0 = None  # pressure [Pa]
+        self.consumption = 0  # Consumption (+: outbound, -: inbound)
         self.zeta = 0
         self.connectedTubes = []
         self.neighbouringNodes = []
@@ -43,6 +45,7 @@ class Network:
             coordinates = [nodes_input[i, 0], nodes_input[i, 1], nodes_input[i, 2]]
             self.nodes.append(Node(coordinates))
             self.nodes[i].zeta = nodes_input[i, 3]
+            self.nodes[i].consumption = nodes_input[i, 4] / 3600  # [m^3/h -> m^3/s]
             self.nodes[i].index = i
         for i in range(len(tubes_input[:, 0])):
             self.tubes.append(Tube(tubes_input[i, 0:2]))
