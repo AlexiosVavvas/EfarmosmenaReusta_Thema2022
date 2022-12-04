@@ -1,6 +1,6 @@
-import matplotlib.pyplot as plt
-import numpy as np
 from math import *
+import matplotlib.pyplot as plt
+from ArrowPlot3d import *
 
 
 class Node:
@@ -15,7 +15,7 @@ class Node:
             self.z = 0
         self.p_static = None  # pressure [Pa]
         self.p0 = None  # pressure [Pa]
-        self.consumption = 0  # Consumption (+: outbound, -: inbound)
+        self.consumption = 0  # Consumption (+: inbound, -: outbound)
         self.zeta = 0
         self.connectedTubes = []
         self.neighbouringNodes = []
@@ -42,17 +42,23 @@ class Network:
         tubes_input = np.genfromtxt(tubes_file_dir, delimiter=',', skip_header=1)
         self.nodes = []
         self.tubes = []
+        # Reading Nodes from File
         for i in range(len(nodes_input[:, 0])):
             coordinates = [nodes_input[i, 0], nodes_input[i, 1], nodes_input[i, 2]]
             self.nodes.append(Node(coordinates))
             self.nodes[i].zeta = nodes_input[i, 3]
             self.nodes[i].consumption = nodes_input[i, 4] / 3600  # [m^3/h -> m^3/s]
             self.nodes[i].index = i
+        self.x_coord_boundaries = [min(nodes_input[:, 0]), max(nodes_input[:, 0])]
+        self.y_coord_boundaries = [min(nodes_input[:, 1]), max(nodes_input[:, 1])]
+        self.z_coord_boundaries = [min(nodes_input[:, 2]), max(nodes_input[:, 2])]
+        # Reading Tubes from File
         for i in range(len(tubes_input[:, 0])):
             self.tubes.append(Tube(tubes_input[i, 0:2]))
             self.tubes[i].length = tubes_input[i, 2]
             self.tubes[i].zeta = tubes_input[i, 3]
             self.tubes[i].index = i
+            self.tubes[i].diameter = tubes_input[i, 4]
         self.number_of_nodes = len(self.nodes)
         self.number_of_tubes = len(self.tubes)
 
@@ -71,7 +77,7 @@ class Network:
                 else:
                     self.nodes[i].neighbouringNodes.append(self.tubes[tube_index].connectedNodes[1])
 
-    def GetTubeIndexConnectingIwithJ(self, node_i_index: int, node_j_index: int):
+    def GetTubeIndexConnecting_I_with_J(self, node_i_index: int, node_j_index: int):
         for conn_tube_index in self.nodes[node_i_index].connectedTubes:
             if self.tubes[conn_tube_index].connectedNodes[0] == node_j_index \
                     or self.tubes[conn_tube_index].connectedNodes[1] == node_j_index:
@@ -87,6 +93,41 @@ class Network:
             plt.plot(xs, ys, zs, 'ko-')
 
         plt.grid()
+        plt.show()
+
+    def DrawQ_withArrows(self):
+        plt.figure()
+        ax = plt.axes(projection='3d')
+        ax.set_xlim(self.x_coord_boundaries)
+        ax.set_ylim(self.y_coord_boundaries)
+        ax.set_zlim(self.z_coord_boundaries)
+        for i in range(self.number_of_tubes):
+            n_small = min(self.tubes[i].connectedNodes)
+            n_large = max(self.tubes[i].connectedNodes)
+
+            delta_x = self.nodes[n_large].x - self.nodes[n_small].x
+            delta_y = self.nodes[n_large].y - self.nodes[n_small].y
+            delta_z = self.nodes[n_large].z - self.nodes[n_small].z
+
+            if self.tubes[i].Q >= 0:
+                ax.arrow3D(self.nodes[n_small].x, self.nodes[n_small].y, self.nodes[n_small].z,
+                           delta_x, delta_y, delta_z,
+                           mutation_scale=20,
+                           arrowstyle="-|>",
+                           ec='black',
+                           fc='black')
+            else:
+                ax.arrow3D(self.nodes[n_large].x, self.nodes[n_large].y, self.nodes[n_large].z,
+                           -delta_x, -delta_y, -delta_z,
+                           mutation_scale=20,
+                           arrowstyle="-|>",
+                           ec='black',
+                           fc='black')
+        for node_ in self.nodes:
+            if node_.consumption < 0:
+                ax.scatter(node_.x, node_.y, node_.z, color='red')
+            elif node_.consumption > 0:
+                ax.scatter(node_.x, node_.y, node_.z, color='blue')
         plt.show()
 
 
