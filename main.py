@@ -9,7 +9,7 @@ my_network.FindNeighbouringElements()
 
 # First solve network with NR
 my_network.SolveNR(300, 0.1, 10 ** -5, False, True)
-# my_network.DrawQ_withArrows()
+my_network.DrawQ_withArrows()
 # p_drop_0 = my_network.max_p0_drop
 
 # Getting standard diameters from file

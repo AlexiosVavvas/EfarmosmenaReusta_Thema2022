@@ -9,6 +9,12 @@ ro_air = 1.225  # density [kg/m^3]
 g = 9.81  # gravity [m/s^2]
 epsilon = 0.05e3  # absolute roughness [m]
 
+i_from_name = 1.5  # το ι απο την εκφώνηση
+# concurrency factors from table
+f_TH_R = 0.283  # r -> type: 1 (from file)
+f_ME = 0.294  # me -> type: 2 (from file)
+f_TH_X = 0.8  # r -> type: 3 (from file)
+
 
 class Node:
 
@@ -25,6 +31,7 @@ class Node:
         self.zeta = 0
         self.connectedTubes = []
         self.neighbouringNodes = []
+        self.consumer_type = None
 
 
 class Tube:
@@ -50,13 +57,24 @@ class Network:
         tubes_input = np.genfromtxt(tubes_file_dir, delimiter=',', skip_header=1)
         self.nodes = []
         self.tubes = []
+        self.input_consumption = 0
         # Reading Nodes from File
         for i in range(len(nodes_input[:, 0])):
             coordinates = [nodes_input[i, 0], nodes_input[i, 1], nodes_input[i, 2]]
             self.nodes.append(Node(coordinates))
             self.nodes[i].zeta = nodes_input[i, 3]
+            self.nodes[i].consumer_type = nodes_input[i, 5]
             self.nodes[i].consumption = nodes_input[i, 4] / 3600  # [m^3/h -> m^3/s]
+            # Differentiating C value based on consumption type
+            if self.nodes[i].consumer_type == 1:
+                self.nodes[i].consumption *= i_from_name * f_TH_R
+            elif self.nodes[i].consumer_type == 3:
+                self.nodes[i].consumption *= i_from_name * f_TH_X
+            elif self.nodes[i].consumer_type == 2:
+                self.nodes[i].consumption *= i_from_name * f_ME
+            self.input_consumption += self.nodes[i].consumption
             self.nodes[i].index = i
+        self.input_consumption = abs(self.input_consumption)
         self.x_coord_boundaries = [min(nodes_input[:, 0]), max(nodes_input[:, 0])]
         self.y_coord_boundaries = [min(nodes_input[:, 1]), max(nodes_input[:, 1])]
         self.z_coord_boundaries = [min(nodes_input[:, 2]), max(nodes_input[:, 2])]
@@ -71,7 +89,6 @@ class Network:
         self.number_of_tubes = len(self.tubes)
         self.max_p0_drop = None
         self.max_p_drop = None
-        self.input_consumption = abs(sum(nodes_input[:, 4])) / 3600  # [m^3/s]
 
     # given a set of nodes and tubes,
     # it finds the specific tube that connects to each node
