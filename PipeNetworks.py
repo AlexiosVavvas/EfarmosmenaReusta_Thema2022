@@ -20,7 +20,6 @@ class Node:
             self.z = coordinates[2]
         else:
             self.z = 0
-        self.p_static = None  # pressure [Pa]
         self.p0 = None  # pressure [Pa]
         self.consumption = 0  # Consumption (+: inbound, -: outbound)
         self.zeta = 0
@@ -39,7 +38,8 @@ class Tube:
         self.u = None  # speed
         self.kappa = None
         self.lamda = None
-        self.zeta = 0
+        self.zeta = 0  # εντοπισμένες απώλειες στη διαδρομή
+        self.zeta_from_node = 0  # εντοπισμένες απώλειες στον κόμβο εισόδου
         self.connectedNodes = list(connected_nodes.astype(int))  # index of nodes at each end
 
 
@@ -71,6 +71,7 @@ class Network:
         self.number_of_tubes = len(self.tubes)
         self.max_p0_drop = None
         self.max_p_drop = None
+        self.input_consumption = abs(sum(nodes_input[:, 4])) / 3600  # [m^3/s]
 
     # given a set of nodes and tubes,
     # it finds the specific tube that connects to each node
@@ -145,17 +146,21 @@ class Network:
         if print_flag:
             print()
             print(f"------------- NEWTON - RAPHSON -------------")
-        # Manually initialize static pressures
-        p_entrance = 0.025e5
-        self.nodes[0].p_static = p_entrance
+
+        # Manually initialize total pressures
+        p_entrance = 0.025e5  # [Pa] (static pressure)
+        self.nodes[0].p0 = p_entrance + 8 * ro_gas * (self.input_consumption ** 2) / \
+                           ((pi ** 2) * (self.tubes[self.nodes[0].connectedTubes[0]].diameter ** 4)) + \
+                           (ro_gas - ro_air) * g * self.nodes[0].z
         p_drop_step = 0.2 * p_entrance / self.number_of_nodes
         for i in range(1, self.number_of_nodes):
-            self.nodes[i].p_static = abs(p_entrance - p_drop_step * i)
+            self.nodes[i].p0 = abs(p_entrance - p_drop_step * i)
 
         # Calculating Tube Kappa
         for tube_ in self.tubes:
             tube_.lamda = (1 / (1.14 - 2 * log10(epsilon / tube_.diameter))) ** 2  # Jain's Equation for Re->Inf
-            tube_.kappa = tube_.lamda * tube_.length / tube_.diameter
+            tube_.kappa = (tube_.lamda * tube_.length / tube_.diameter + tube_.zeta + tube_.zeta_from_node) * \
+                          (8 * ro_gas) / ((pi ** 2) * (tube_.diameter ** 4))
 
         # Newton-Raphson Method
         F = np.zeros(self.number_of_nodes)
@@ -166,7 +171,7 @@ class Network:
 
         p0_guess = np.zeros(self.number_of_nodes)
         for i, node in enumerate(self.nodes):
-            p0_guess[i] = node.p_static
+            p0_guess[i] = node.p0
 
         iter_count = 0
         first_round = True
@@ -206,18 +211,43 @@ class Network:
 
             iter_count += 1
             first_round = False
+
         if print_flag:
             print(f"Loop Finished in {iter_count}/{ITER} iterations "
                   f"while error handling returns <<{((sqrt(sum(abs(deltaP)))) / self.number_of_nodes > deltaP_stop)}>>\n")
 
         # Saving converged results to network object variables
-        p_static = np.zeros(self.number_of_nodes)
         for i, node in enumerate(self.nodes):
             node.p0 = p0_guess[i]
-            node.p_static = node.p0 - (ro_gas - ro_air) * g * node.z
-            p_static[i] = node.p_static
             if print_flag:
-                print(f"Node {i} has P0 = {node.p0:.5f}, \tP_static = {node.p_static} \tand final dP0 = {deltaP[i]}")
+                print(f"Node {i} has P0 = {node.p0:.5f}\tand final dP0 = {deltaP[i]}")
+        if print_flag: print()
+
+        # Calculating Q (+: from lower node index to higher)
+        #   e.g. if Q connecting node 2 and 3 is <0
+        #        that means that if flows from 3 -> 2
+        for tube_ in self.tubes:
+            i = tube_.connectedNodes[0]
+            j = tube_.connectedNodes[1]
+            Q = sign(self.nodes[i].p0, self.nodes[j].p0) * \
+                sqrt(abs(self.nodes[i].p0 - self.nodes[j].p0) / tube_.kappa)
+            if i > j:
+                Q *= -1
+            tube_.Q = Q
+            tube_.u = 8 * Q ** 2 * ro_gas / (pi ** 2 * tube_.diameter ** 4)
+
+            if print_flag:
+                print(f"Tube {tube_.index} (nodes {i} - {j}) diameter : {tube_.diameter * 1000:.2f} [mm]\thas\t"
+                      f"Q = {Q * 3600:.4f} [m^3/h]\t-> u = {tube_.u:.4f} [m/s]")
+
+        # Finding static pressures
+        p_static = []
+        for tube_ in self.tubes:
+            for i in range(2):
+                node_ind = tube_.connectedNodes[i]
+                p_static.append(self.nodes[node_ind].p0 -
+                                8 * ro_gas * (tube_.Q ** 2) / ((pi ** 2) * (tube_.diameter ** 4)) -
+                                (ro_gas - ro_air) * g * self.nodes[node_ind].z)
 
         # showing final plot
         if plot_flag:
@@ -236,22 +266,11 @@ class Network:
             print(f"Max static pressure drop: {self.max_p_drop / 100:.8f} [mBar]")
             print()
 
-        # Calculating Q (+: from lower node index to higher)
-        #   e.g. if Q connecting node 2 and 3 is <0
-        #        that means that if flows from 3 -> 2
-        for tube_ in self.tubes:
-            i = tube_.connectedNodes[0]
-            j = tube_.connectedNodes[1]
-            Q = sign(self.nodes[i].p0, self.nodes[j].p0) * \
-                sqrt(abs(self.nodes[i].p0 - self.nodes[j].p0) / tube_.kappa)
-            if i > j:
-                Q *= -1
-            tube_.Q = Q
-            tube_.u = 8 * Q ** 2 * ro_gas / (pi ** 2 * tube_.diameter ** 4)
-
-            if print_flag:
-                print(f"Tube {tube_.index} (nodes {i} - {j}) ({tube_.diameter*1000:.2f}[mm])has \t"
-                      f"Q = {Q * 3600:.4f} [m^3/h]\t-> u = {tube_.u:.4f} [m/s]")
+        # Return whether method converged or not
+        if iter_count < ITER:
+            return False
+        else:
+            return True
 
 
 def sign(x, y):
@@ -259,20 +278,3 @@ def sign(x, y):
         return 1
     else:
         return -1
-
-
-# Condition number to check if a matrix is ill-conditioned or not
-# if the result is << 1 then it probably is
-def matrix_state(mat: np.ndarray):
-    a_ = abs(np.linalg.det(mat))
-    b_ = 1
-    row, col = mat.shape
-    r = np.zeros(row)
-    for i in range(row):
-        ri_temp = 0
-        for j in range(col):
-            ri_temp += mat[i, j] ** 2
-        r[i] = sqrt(ri_temp)
-        b_ *= r[i]
-
-    return a_ / b_
