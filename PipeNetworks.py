@@ -1,5 +1,9 @@
 from math import *
 import matplotlib.pyplot as plt
+import os
+import numpy as np
+
+
 from ArrowPlot3d import *
 
 # Constants
@@ -13,7 +17,7 @@ i_from_name = 1.5  # το ι απο την εκφώνηση
 # concurrency factors from table
 f_TH_R = 0.283  # r -> type: 1 (from file)
 f_ME = 0.294  # me -> type: 2 (from file)
-f_TH_X = 0.8  # r -> type: 3 (from file)
+f_TH_X = 0.8  # x -> type: 3 (from file)
 
 
 class Node:
@@ -28,6 +32,7 @@ class Node:
             self.z = 0
         self.p0 = None  # pressure [Pa]
         self.consumption = 0  # Consumption (+: inbound, -: outbound)
+        self.cons_init = 0  # Initial (not scaled) value for reference later
         self.zeta = 0
         self.connectedTubes = []
         self.neighbouringNodes = []
@@ -58,11 +63,13 @@ class Network:
         self.nodes = []
         self.tubes = []
         self.input_consumption = 0
+
         # Reading Nodes from File
         for i in range(len(nodes_input[:, 0])):
             coordinates = [nodes_input[i, 0], nodes_input[i, 1], nodes_input[i, 2]]
             self.nodes.append(Node(coordinates))
             self.nodes[i].zeta = nodes_input[i, 3]
+            # Finding consumption Q, going in or out of each node, based on its type
             self.nodes[i].consumer_type = nodes_input[i, 5]
             self.nodes[i].consumption = nodes_input[i, 4] / 3600  # [m^3/h -> m^3/s]
             # Differentiating C value based on consumption type
@@ -72,12 +79,15 @@ class Network:
                 self.nodes[i].consumption *= i_from_name * f_TH_X
             elif self.nodes[i].consumer_type == 2:
                 self.nodes[i].consumption *= i_from_name * f_ME
+            self.nodes[i].cons_init = self.nodes[i].consumption  # saving value
             self.input_consumption += self.nodes[i].consumption
             self.nodes[i].index = i
         self.input_consumption = abs(self.input_consumption)
+
         self.x_coord_boundaries = [min(nodes_input[:, 0]), max(nodes_input[:, 0])]
         self.y_coord_boundaries = [min(nodes_input[:, 1]), max(nodes_input[:, 1])]
         self.z_coord_boundaries = [min(nodes_input[:, 2]), max(nodes_input[:, 2])]
+
         # Reading Tubes from File
         for i in range(len(tubes_input[:, 0])):
             self.tubes.append(Tube(tubes_input[i, 0:2]))
@@ -85,6 +95,7 @@ class Network:
             self.tubes[i].zeta = tubes_input[i, 3]
             self.tubes[i].index = i
             self.tubes[i].diameter = tubes_input[i, 4]
+
         self.number_of_nodes = len(self.nodes)
         self.number_of_tubes = len(self.tubes)
         self.max_p0_drop = None
@@ -105,12 +116,24 @@ class Network:
                 else:
                     self.nodes[i].neighbouringNodes.append(self.tubes[tube_index].connectedNodes[1])
 
+    # Returns the index of the tube connecting 2 neighboring nodes
     def GetTubeIndexConnecting_I_with_J(self, node_i_index: int, node_j_index: int):
         for conn_tube_index in self.nodes[node_i_index].connectedTubes:
             if self.tubes[conn_tube_index].connectedNodes[0] == node_j_index \
                     or self.tubes[conn_tube_index].connectedNodes[1] == node_j_index:
                 return conn_tube_index
 
+    # Uniformly scale all consumptions by "x" regarding the initial values
+    # e.g. if C = 12 -> 12x [m^3/h]
+    def ChangeConsumptionPercentage(self, x):
+        self.input_consumption = 0
+        for node_ in self.nodes:
+            node_.consumption = node_.cons_init * x
+            self.input_consumption += node_.consumption
+        self.input_consumption = abs(self.input_consumption)
+
+    # Drawing a basic schematic of the network portraying only nodes and tubes
+    # in 3d space
     def Plot(self):
         plt.figure()
         plt.axes(projection='3d')
@@ -123,6 +146,10 @@ class Network:
         plt.grid()
         plt.show()
 
+    # Drawing a detailed schematic of the network showing the direction
+    # of gas flow in each tube
+    # If a node is blue -> there is incoming Q through it
+    #              red  -> there is Q coming out of it (consumption)
     def DrawQ_withArrows(self):
         plt.figure()
         ax = plt.axes(projection='3d')
@@ -156,6 +183,7 @@ class Network:
                 ax.scatter(node_.x, node_.y, node_.z, color='red')
             elif node_.consumption > 0:
                 ax.scatter(node_.x, node_.y, node_.z, color='blue')
+        plt.savefig("Network_with_arrows.png")
         plt.show()
 
     # noinspection PyPep8Naming
@@ -179,21 +207,22 @@ class Network:
             tube_.kappa = (tube_.lamda * tube_.length / tube_.diameter + tube_.zeta + tube_.zeta_from_node) * \
                           (8 * ro_gas) / ((pi ** 2) * (tube_.diameter ** 4))
 
-        # Newton-Raphson Method
+        # ---------------------- Newton-Raphson Method ----------------------
+        # Initializing variables for later use
         F = np.zeros(self.number_of_nodes)
         DF = np.zeros((self.number_of_nodes, self.number_of_nodes))  # Jacobian Matrix
         DF[0, 0] = 1
         deltaP = np.zeros(self.number_of_nodes)
         deltaP_old = np.zeros(self.number_of_nodes)
 
+        # extracting pressures to a matrix (much easier to handle)
         p0_guess = np.zeros(self.number_of_nodes)
         for i, node in enumerate(self.nodes):
             p0_guess[i] = node.p0
 
         iter_count = 0
         first_round = True
-        while (((sqrt(sum(abs(deltaP)))) / self.number_of_nodes > deltaP_stop) or first_round) & (
-                iter_count < ITER):
+        while (((sqrt(sum(abs(deltaP)))) / self.number_of_nodes > deltaP_stop) or first_round) & (iter_count < ITER):
 
             # Finding F() values
             for i in range(1, self.number_of_nodes):
@@ -233,11 +262,11 @@ class Network:
             print(f"Loop Finished in {iter_count}/{ITER} iterations "
                   f"while error handling returns <<{((sqrt(sum(abs(deltaP)))) / self.number_of_nodes > deltaP_stop)}>>\n")
 
-        # Saving converged results to network object variables
+        # Saving converged results back to network object variables
         for i, node in enumerate(self.nodes):
             node.p0 = p0_guess[i]
             if print_flag:
-                print(f"Node {i} has P0 = {node.p0:.5f}\tand final dP0 = {deltaP[i]}")
+                print(f"Node {i} has P0 = {node.p0:.5f} [Pa] \tand final dP0 = {deltaP[i]:.3e}")
         if print_flag: print()
 
         # Calculating Q (+: from lower node index to higher)
@@ -257,7 +286,7 @@ class Network:
                 print(f"Tube {tube_.index} (nodes {i} - {j}) diameter : {tube_.diameter * 1000:.2f} [mm]\thas\t"
                       f"Q = {Q * 3600:.4f} [m^3/h]\t-> u = {tube_.u:.4f} [m/s]")
 
-        # Finding static pressures
+        # Calculating static pressures everywhere
         p_static = []
         for tube_ in self.tubes:
             for i in range(2):
@@ -265,6 +294,14 @@ class Network:
                 p_static.append(self.nodes[node_ind].p0 -
                                 8 * ro_gas * (tube_.Q ** 2) / ((pi ** 2) * (tube_.diameter ** 4)) -
                                 (ro_gas - ro_air) * g * self.nodes[node_ind].z)
+
+        # max pressure drop
+        self.max_p0_drop = (max(p0_guess) - min(p0_guess))  # [Pa]
+        self.max_p_drop = (max(p_static) - min(p_static))  # [Pa]
+        if print_flag:
+            print(f"Max total pressure drop: {self.max_p0_drop / 100:.8f} [mBar]")
+            print(f"Max static pressure drop: {self.max_p_drop / 100:.8f} [mBar]")
+            print()
 
         # showing final plot
         if plot_flag:
@@ -275,16 +312,8 @@ class Network:
             plt.draw()
             plt.show()
 
-        # max pressure drop calc
-        self.max_p0_drop = (max(p0_guess) - min(p0_guess))  # [Pa]
-        self.max_p_drop = (max(p_static) - min(p_static))  # [Pa]
-        if print_flag:
-            print(f"Max total pressure drop: {self.max_p0_drop / 100:.8f} [mBar]")
-            print(f"Max static pressure drop: {self.max_p_drop / 100:.8f} [mBar]")
-            print()
-
         # Return whether method converged or not
-        if iter_count < ITER:
+        if iter_count <= ITER:
             return False
         else:
             return True

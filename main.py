@@ -9,7 +9,7 @@ my_network.FindNeighbouringElements()
 
 # First solve network with NR
 my_network.SolveNR(300, 0.1, 10 ** -5, False, True)
-my_network.DrawQ_withArrows()
+# my_network.DrawQ_withArrows()
 # p_drop_0 = my_network.max_p0_drop
 
 # Getting standard diameters from file
@@ -18,7 +18,6 @@ std_diam_len = len(std_diam)
 
 # Checking and Changing
 speed_goal = 4  # [m/s]
-# max_p0_drop_goal = 200  # [Pa]
 
 for i0 in range(8):
 
@@ -52,4 +51,37 @@ for i0 in range(8):
     # Solve with NR
     my_network.SolveNR(300, 0.1, 10 ** -5, False, True)
 
-# print((my_network.max_p0_drop - p_drop_0)/p_drop_0*100)
+# -------------- PRESSURE VARIANCE PLOTTING --------------
+
+# Getting consumption variance from a file
+cons_var = np.genfromtxt("consumption_variance.csv", delimiter=',', skip_header=1)
+cons_var_len = len(cons_var)
+
+# saving initial pressure range to use in plotting afterwards
+y_ = [my_network.nodes[i].p0 for i in range(my_network.number_of_nodes)]
+plot_range = [min(y_) * 0.9, max(y_) * 1.1]
+
+# Creating sub-folder to save plots
+if not os.path.exists("BarPlots"):
+    os.makedirs("BarPlots")
+
+for i in range(cons_var_len):
+    current_time = cons_var[i][0]
+    change_pc = cons_var[i][1] / 100  # consumption change percentage
+
+    my_network.ChangeConsumptionPercentage(change_pc)
+    my_network.SolveNR(300, 0.1, 10 ** -5, False, False)
+
+    # Bar Plot
+    x_ = np.arange(my_network.number_of_nodes).astype(int)
+    y_ = [my_network.nodes[i].p0 for i in range(my_network.number_of_nodes)]
+
+    plt.figure()
+    plt.bar(x_, y_, color='b')
+    plt.title(f"Pressure Variance in Network \n"
+              f"(at {int(current_time)} o'clock) - {int(cons_var[i][1])}%")
+    plt.xlabel("Node Index")
+    plt.ylabel("Pressure [Pa]")
+    plt.ylim(plot_range)
+    plt.xticks(x_)
+    plt.savefig(f"BarPlots/time_{int(current_time)}_{int(cons_var[i][1])}%.png")  # Saving to file
